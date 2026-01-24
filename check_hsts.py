@@ -88,13 +88,18 @@ def classify_cache_control(cache_control_value: Optional[str]) -> tuple[str, str
         return "✅", "Good (revalidate)"
 
     # Moderate: has cache control but allows caching
-    if any(directive in value_lower for directive in ["max-age", "public", "private", "no-cache"]):
+    if any(
+        directive in value_lower
+        for directive in ["max-age", "public", "private", "no-cache"]
+    ):
         return "⚠️", "Moderate (cacheable)"
 
     return "❓", "Unknown"
 
 
-def check_hsts(url: str) -> tuple[str, Optional[str], str, Optional[str], Optional[str], str]:
+def check_hsts(
+    url: str,
+) -> tuple[str, Optional[str], str, Optional[str], Optional[str], str]:
     """
     Check HSTS header for a given URL.
     Returns (emoji, hsts_value, classification, server_header, cache_control_value, cache_control_classification).
@@ -105,12 +110,12 @@ def check_hsts(url: str) -> tuple[str, Optional[str], str, Optional[str], Option
 
     try:
         # Set curl user agent
-        headers = {
-            'User-Agent': 'curl/8.7.1'
-        }
+        headers = {"User-Agent": "curl/8.7.1"}
 
         # Make request (follow redirects, timeout after 5 seconds)
-        response = requests.get(url, headers=headers, timeout=5, allow_redirects=True, verify=True)
+        response = requests.get(
+            url, headers=headers, timeout=5, allow_redirects=True, verify=True
+        )
 
         # Get headers (case-insensitive)
         hsts_value = response.headers.get("Strict-Transport-Security")
@@ -121,7 +126,13 @@ def check_hsts(url: str) -> tuple[str, Optional[str], str, Optional[str], Option
         if not server_header:
             try:
                 http_url = url.replace("https://", "http://", 1)
-                http_response = requests.get(http_url, headers=headers, timeout=5, allow_redirects=True, verify=False)
+                http_response = requests.get(
+                    http_url,
+                    headers=headers,
+                    timeout=5,
+                    allow_redirects=True,
+                    verify=False,
+                )
                 server_header = http_response.headers.get("Server")
 
                 # Also check HTTP redirect history
@@ -137,7 +148,14 @@ def check_hsts(url: str) -> tuple[str, Optional[str], str, Optional[str], Option
         emoji, classification = classify_hsts(hsts_value)
         _, cache_classification = classify_cache_control(cache_control_value)
 
-        return emoji, hsts_value, classification, server_header, cache_control_value, cache_classification
+        return (
+            emoji,
+            hsts_value,
+            classification,
+            server_header,
+            cache_control_value,
+            cache_classification,
+        )
 
     except requests.exceptions.SSLError:
         return "🔓    ", None, "SSL Error", None, None, "N/A"
@@ -195,7 +213,14 @@ def main():
             for future in as_completed(future_to_address):
                 address = future_to_address[future]
                 try:
-                    emoji, hsts_value, classification, server_header, cache_control_value, cache_classification = future.result()
+                    (
+                        emoji,
+                        hsts_value,
+                        classification,
+                        server_header,
+                        cache_control_value,
+                        cache_classification,
+                    ) = future.result()
                     results[address] = (
                         emoji,
                         hsts_value,
@@ -205,12 +230,26 @@ def main():
                         cache_classification,
                     )
                 except Exception as e:
-                    results[address] = ("❓    ", None, f"Error: {str(e)}", None, None, "N/A")
+                    results[address] = (
+                        "❓    ",
+                        None,
+                        f"Error: {str(e)}",
+                        None,
+                        None,
+                        "N/A",
+                    )
                 pbar.update(1)
 
     # Process results in original order
     for address in addresses:
-        emoji, hsts_value, classification, server_header, cache_control_value, cache_classification = results[address]
+        (
+            emoji,
+            hsts_value,
+            classification,
+            server_header,
+            cache_control_value,
+            cache_classification,
+        ) = results[address]
 
         print(f"\n{emoji} {address}")
         print(f"   Classification: {classification}")
