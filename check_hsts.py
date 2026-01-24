@@ -104,13 +104,35 @@ def check_hsts(url: str) -> tuple[str, Optional[str], str, Optional[str], Option
         url = f"https://{url}"
 
     try:
-        # Make request (follow redirects, timeout after 10 seconds)
-        response = requests.get(url, timeout=10, allow_redirects=True, verify=True)
+        # Set curl user agent
+        headers = {
+            'User-Agent': 'curl/8.7.1'
+        }
+
+        # Make request (follow redirects, timeout after 5 seconds)
+        response = requests.get(url, headers=headers, timeout=5, allow_redirects=True, verify=True)
 
         # Get headers (case-insensitive)
         hsts_value = response.headers.get("Strict-Transport-Security")
         server_header = response.headers.get("Server")
         cache_control_value = response.headers.get("Cache-Control")
+
+        # If still no Server header, try HTTP request to get it
+        if not server_header:
+            try:
+                http_url = url.replace("https://", "http://", 1)
+                http_response = requests.get(http_url, headers=headers, timeout=5, allow_redirects=True, verify=False)
+                server_header = http_response.headers.get("Server")
+
+                # Also check HTTP redirect history
+                if not server_header and http_response.history:
+                    for hist_response in http_response.history:
+                        server_header = hist_response.headers.get("Server")
+                        if server_header:
+                            break
+            except Exception:
+                # If HTTP request fails, continue without Server header
+                pass
 
         emoji, classification = classify_hsts(hsts_value)
         _, cache_classification = classify_cache_control(cache_control_value)
