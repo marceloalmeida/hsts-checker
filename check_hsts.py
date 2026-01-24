@@ -65,10 +65,39 @@ def classify_hsts(hsts_value: Optional[str]) -> tuple[str, str]:
         return "❌    ", "Invalid"
 
 
-def check_hsts(url: str) -> tuple[str, Optional[str], str, Optional[str]]:
+def classify_cache_control(cache_control_value: Optional[str]) -> tuple[str, str]:
+    """
+    Classify Cache-Control configuration and return (emoji, classification).
+
+    Classifications:
+    ✅ Good: no-store or (no-cache and must-revalidate)
+    ⚠️ Moderate: has cache control but allows caching
+    ❌ Missing: No Cache-Control header
+    """
+    if not cache_control_value:
+        return "❌", "Missing"
+
+    value_lower = cache_control_value.lower()
+
+    # Best practice: no-store prevents any caching
+    if "no-store" in value_lower:
+        return "✅", "Good (no-store)"
+
+    # Good: no-cache with must-revalidate forces revalidation
+    if "no-cache" in value_lower and "must-revalidate" in value_lower:
+        return "✅", "Good (revalidate)"
+
+    # Moderate: has cache control but allows caching
+    if any(directive in value_lower for directive in ["max-age", "public", "private", "no-cache"]):
+        return "⚠️", "Moderate (cacheable)"
+
+    return "❓", "Unknown"
+
+
+def check_hsts(url: str) -> tuple[str, Optional[str], str, Optional[str], Optional[str], str]:
     """
     Check HSTS header for a given URL.
-    Returns (emoji, hsts_value, classification, server_header).
+    Returns (emoji, hsts_value, classification, server_header, cache_control_value, cache_control_classification).
     """
     # Ensure URL has a scheme
     if not urlparse(url).scheme:
@@ -78,21 +107,24 @@ def check_hsts(url: str) -> tuple[str, Optional[str], str, Optional[str]]:
         # Make request (follow redirects, timeout after 10 seconds)
         response = requests.get(url, timeout=10, allow_redirects=True, verify=True)
 
-        # Get HSTS header (case-insensitive)
+        # Get headers (case-insensitive)
         hsts_value = response.headers.get("Strict-Transport-Security")
         server_header = response.headers.get("Server")
-        emoji, classification = classify_hsts(hsts_value)
+        cache_control_value = response.headers.get("Cache-Control")
 
-        return emoji, hsts_value, classification, server_header
+        emoji, classification = classify_hsts(hsts_value)
+        _, cache_classification = classify_cache_control(cache_control_value)
+
+        return emoji, hsts_value, classification, server_header, cache_control_value, cache_classification
 
     except requests.exceptions.SSLError:
-        return "🔓    ", None, "SSL Error", None
+        return "🔓    ", None, "SSL Error", None, None, "N/A"
     except requests.exceptions.ConnectionError:
-        return "🔌    ", None, "Connection Error", None
+        return "🔌    ", None, "Connection Error", None, None, "N/A"
     except requests.exceptions.Timeout:
-        return "⏱️    ", None, "Timeout", None
+        return "⏱️    ", None, "Timeout", None, None, "N/A"
     except Exception as e:
-        return "❓    ", None, f"Error: {str(e)}", None
+        return "❓    ", None, f"Error: {str(e)}", None, None, "N/A"
 
 
 def main():
@@ -141,25 +173,30 @@ def main():
             for future in as_completed(future_to_address):
                 address = future_to_address[future]
                 try:
-                    emoji, hsts_value, classification, server_header = future.result()
+                    emoji, hsts_value, classification, server_header, cache_control_value, cache_classification = future.result()
                     results[address] = (
                         emoji,
                         hsts_value,
                         classification,
                         server_header,
+                        cache_control_value,
+                        cache_classification,
                     )
                 except Exception as e:
-                    results[address] = ("❓    ", None, f"Error: {str(e)}", None)
+                    results[address] = ("❓    ", None, f"Error: {str(e)}", None, None, "N/A")
                 pbar.update(1)
 
     # Process results in original order
     for address in addresses:
-        emoji, hsts_value, classification, server_header = results[address]
+        emoji, hsts_value, classification, server_header, cache_control_value, cache_classification = results[address]
 
         print(f"\n{emoji} {address}")
         print(f"   Classification: {classification}")
         if server_header:
             print(f"   Server: {server_header}")
+        if cache_control_value:
+            print(f"   Cache-Control: {cache_control_value}")
+            print(f"   Cache Classification: {cache_classification}")
 
         if hsts_value:
             print(f"   HSTS Header: {hsts_value}")
@@ -190,6 +227,8 @@ def main():
                     "Address": address,
                     "Classification": classification,
                     "Server": server_header or "",
+                    "Cache-Control": cache_control_value or "",
+                    "Cache Classification": cache_classification,
                     "HSTS Header": hsts_value or "",
                     "Max-Age (seconds)": max_age_value,
                     "Max-Age (days)": max_age_days,
@@ -204,6 +243,8 @@ def main():
                     "Address": address,
                     "Classification": classification,
                     "Server": server_header or "",
+                    "Cache-Control": cache_control_value or "",
+                    "Cache Classification": cache_classification,
                     "HSTS Header": "",
                     "Max-Age (seconds)": "",
                     "Max-Age (days)": "",
@@ -221,6 +262,8 @@ def main():
                 "Address",
                 "Classification",
                 "Server",
+                "Cache-Control",
+                "Cache Classification",
                 "HSTS Header",
                 "Max-Age (seconds)",
                 "Max-Age (days)",
@@ -235,14 +278,20 @@ def main():
         print(f"\n⚠️  Failed to write CSV file: {e}")
 
     print("\n✨ Legend:")
-    print("  🔒✅ Excellent - max-age ≥ 1 year + includeSubDomains + preload")
-    print("  ✅🛡️  Strong    - max-age ≥ 1 year + includeSubDomains")
-    print("  ✅    Good     - max-age ≥ 1 year")
-    print("  ⚠️    Weak     - max-age < 1 year")
-    print("  ❌    Missing  - No HSTS header")
-    print("  🔓    SSL Error")
-    print("  🔌    Connection Error")
-    print("  ⏱️    Timeout")
+    print("  HSTS:")
+    print("    🔒✅ Excellent - max-age ≥ 1 year + includeSubDomains + preload")
+    print("    ✅🛡️  Strong    - max-age ≥ 1 year + includeSubDomains")
+    print("    ✅    Good     - max-age ≥ 1 year")
+    print("    ⚠️    Weak     - max-age < 1 year")
+    print("    ❌    Missing  - No HSTS header")
+    print("  Cache-Control:")
+    print("    ✅ Good      - no-store or (no-cache + must-revalidate)")
+    print("    ⚠️ Moderate  - has cache control but allows caching")
+    print("    ❌ Missing   - No Cache-Control header")
+    print("  Errors:")
+    print("    🔓    SSL Error")
+    print("    🔌    Connection Error")
+    print("    ⏱️    Timeout")
 
 
 if __name__ == "__main__":
