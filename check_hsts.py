@@ -7,11 +7,15 @@ Reads a list of addresses from a file and checks their HSTS headers.
 import sys
 import csv
 import requests
+import urllib3
 from urllib.parse import urlparse
 from typing import Optional, Dict
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
+
+# Disable SSL warnings for HTTP fallback requests
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def parse_hsts_header(hsts_value: str) -> Dict[str, any]:
@@ -356,4 +360,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Interrupted by user (Ctrl+C). Exiting...")
+        sys.exit(0)
